@@ -1,0 +1,981 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DJI Bereikplanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Layout: zijpaneel (instrumentenpaneel) links, luchtvaartkaart rechts, hoogteprofiel onder de kaart.
+   Kleuren ontleend aan VFR-luchtvaartkaarten: magenta = signaal, kaartblauw = accu. */
+:root{
+  --bg:#E9EEF1; --panel:#FFFFFF; --panel-2:#F4F7F9; --ink:#14202B; --muted:#5A6A77; --line:#D2DBE1;
+  --blue:#1F5FA8; --magenta:#A81F78; --ok:#1C8548; --warn:#B87200; --bad:#C42B2B;
+  --tree:#3A8A38; --bldg:#8C6A52; --terrain:#B9A27F; --sky:#EAF2F8;
+  --f-display:'Barlow Condensed', 'Arial Narrow', sans-serif;
+  --f-body:'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --f-mono:'JetBrains Mono', ui-monospace, Consolas, monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0E151B; --panel:#151F27; --panel-2:#1B2731; --ink:#E2E9EE; --muted:#8FA0AD; --line:#283642;
+  --blue:#5E9DE8; --magenta:#E25DB4; --ok:#3DBB73; --warn:#E5A42E; --bad:#F06262;
+  --tree:#58B055; --bldg:#B48E72; --terrain:#7D6E57; --sky:#13212C; color-scheme:dark; } }
+:root[data-theme="dark"]{
+  --bg:#0E151B; --panel:#151F27; --panel-2:#1B2731; --ink:#E2E9EE; --muted:#8FA0AD; --line:#283642;
+  --blue:#5E9DE8; --magenta:#E25DB4; --ok:#3DBB73; --warn:#E5A42E; --bad:#F06262;
+  --tree:#58B055; --bldg:#B48E72; --terrain:#7D6E57; --sky:#13212C; color-scheme:dark; }
+
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 var(--f-body);}
+button,select,input{font:inherit;color:inherit}
+.app{display:grid;grid-template-columns:390px 1fr;height:100%;}
+aside{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;display:flex;flex-direction:column;}
+.brand{padding:18px 20px 14px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.brand h1{font:700 26px/1 var(--f-display);letter-spacing:.02em;margin:0;text-transform:uppercase}
+.brand h1 b{color:var(--magenta)}
+.brand span{color:var(--muted);font-size:13px}
+section.blk{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.blk h2{font:600 13px/1 var(--f-display);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0;display:flex;justify-content:space-between;align-items:center}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row > *{min-width:0}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);flex:1}
+label.f > span{display:flex;justify-content:space-between}
+label.f output{font-family:var(--f-mono);color:var(--ink);font-size:13px}
+select,input[type=number],input[type=text]{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:7px 9px;width:100%}
+input[type=range]{width:100%;accent-color:var(--magenta)}
+select:focus,input:focus,button:focus-visible{outline:2px solid var(--magenta);outline-offset:1px}
+.seg{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--panel-2)}
+.seg button{flex:1;border:0;background:none;padding:6px 8px;cursor:pointer;font-size:13px;font-weight:500;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--panel)}
+.btn{border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:7px 11px;cursor:pointer;font-size:13px;font-weight:600;display:inline-flex;gap:6px;align-items:center}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--magenta);border-color:var(--magenta);color:#fff}
+.btn.active{outline:2px solid var(--magenta)}
+.specs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.spec{background:var(--panel-2);border-radius:6px;padding:7px 8px;display:flex;flex-direction:column;gap:2px}
+.spec small{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.spec b{font:500 15px/1.1 var(--f-mono)}
+.note{font-size:13px;color:var(--muted)}
+.note a{color:var(--blue)}
+.pt{display:grid;grid-template-columns:22px 1fr auto;gap:8px;align-items:center;font-size:14px}
+.pt .dot{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font:700 11px var(--f-mono);color:#fff}
+.pt .addr{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pt .addr small{display:block;color:var(--muted);font-family:var(--f-mono);font-size:11px}
+.wx{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+/* uitslag */
+.verdict{border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px;border:1px solid var(--line);background:var(--panel-2)}
+.verdict .big{font:700 30px/1 var(--f-display);text-transform:uppercase;letter-spacing:.02em}
+.verdict[data-s="ok"] .big{color:var(--ok)} .verdict[data-s="warn"] .big{color:var(--warn)} .verdict[data-s="bad"] .big{color:var(--bad)}
+.verdict[data-s="ok"]{border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.verdict[data-s="warn"]{border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+.verdict[data-s="bad"]{border-color:color-mix(in srgb,var(--bad) 45%,var(--line))}
+.meter{display:flex;flex-direction:column;gap:4px}
+.meter .lbl{display:flex;justify-content:space-between;font-size:13px}
+.meter .lbl b{font:500 13px var(--f-mono)}
+.bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden;position:relative}
+.bar i{position:absolute;inset:0 auto 0 0;border-radius:4px}
+.pill{font:600 11px/1 var(--f-body);padding:4px 7px;border-radius:20px;text-transform:uppercase;letter-spacing:.06em}
+.pill.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+.pill.warn{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}
+.pill.bad{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+ul.why{margin:0;padding-left:18px;font-size:13.5px;display:flex;flex-direction:column;gap:4px}
+details{font-size:13.5px}
+details summary{cursor:pointer;font-weight:600}
+details p,details li{color:var(--muted)}
+.foot{padding:14px 20px;font-size:12px;color:var(--muted)}
+/* kaart */
+main{position:relative;display:grid;grid-template-rows:1fr auto;min-width:0;min-height:0}
+.mapwrap{position:relative;min-height:0;display:grid}
+#map{min-height:0;height:100%;background:var(--sky)}
+.overlay{position:absolute;z-index:500;}
+.search{top:12px;left:56px;right:200px;max-width:520px;display:flex;flex-direction:column;gap:6px}
+.search form{display:flex;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:5px;box-shadow:0 4px 18px rgb(0 0 0 / .12)}
+.search input{border:0;background:none;padding:6px 8px}
+.results{background:var(--panel);border:1px solid var(--line);border-radius:9px;box-shadow:0 4px 18px rgb(0 0 0 / .12);max-height:300px;overflow:auto}
+.results .r{padding:8px 10px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+.results .r:last-child{border-bottom:0}
+.results .r div{font-size:13px}
+.layers{top:12px;right:12px;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.layers .seg{background:var(--panel);box-shadow:0 2px 10px rgb(0 0 0 / .12)}
+.legend{left:12px;bottom:12px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:12px;display:flex;flex-direction:column;gap:4px;box-shadow:0 2px 10px rgb(0 0 0 / .12)}
+.legend i{display:inline-block;width:22px;height:0;margin-right:6px;vertical-align:middle}
+.status{left:50%;transform:translateX(-50%);bottom:12px;background:var(--ink);color:var(--panel);padding:7px 12px;border-radius:20px;font-size:13px;font-weight:500}
+.mode-hint{top:64px;left:50%;transform:translateX(-50%);background:var(--magenta);color:#fff;padding:7px 12px;border-radius:20px;font-size:13px;font-weight:600}
+.profile{background:var(--panel);border-top:1px solid var(--line);padding:10px 14px 12px;display:flex;flex-direction:column;gap:6px}
+.profile header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.profile h3{margin:0;font:600 13px/1 var(--f-display);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.profile .lg{display:flex;gap:12px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.profile .lg i{display:inline-block;width:12px;height:8px;margin-right:4px;border-radius:2px;vertical-align:middle}
+.canvases{display:grid;grid-template-columns:2fr 1fr;gap:12px;min-width:0}
+.canvases > div{min-width:0}
+canvas{width:100%;display:block}
+#profileCv{height:190px} #marginCv{height:190px}
+.profile .cap{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px}
+.leaflet-container{font:inherit}
+.leaflet-tooltip.tip{background:var(--panel);color:var(--ink);border:1px solid var(--line);font-size:12px}
+.marker-pin{width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:grid;place-items:center;border:2px solid #fff;box-shadow:0 2px 6px rgb(0 0 0 / .35)}
+.marker-pin span{transform:rotate(45deg);color:#fff;font:700 12px var(--f-mono)}
+@media (max-width: 900px){
+  .app{grid-template-columns:1fr;grid-template-rows:auto auto;height:auto}
+  main{order:-1;height:auto;grid-template-rows:62vh auto}
+  .legend{display:none}
+  aside{border-right:0;overflow:visible}
+  .canvases{grid-template-columns:1fr}
+  .search{left:52px;right:12px}
+  .layers{top:auto;bottom:12px;right:12px}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><h1>DJI <b>Bereik</b>planner</h1><span>Haal je het met accu én signaal?</span></div>
+
+    <section class="blk" aria-labelledby="h-drone">
+      <h2 id="h-drone">Drone</h2>
+      <select id="drone" aria-label="Kies drone"></select>
+      <div class="row">
+        <label class="f">Accu<select id="battery"></select></label>
+        <label class="f">Regio (zendvermogen)
+          <div class="seg" id="region"><button type="button" data-v="ce" aria-pressed="true">CE (EU)</button><button type="button" data-v="fcc" aria-pressed="false">FCC (VS)</button></div>
+        </label>
+      </div>
+      <div class="specs" id="specs"></div>
+      <div class="note" id="droneNote"></div>
+    </section>
+
+    <section class="blk" aria-labelledby="h-route">
+      <h2 id="h-route">Route</h2>
+      <div class="pt"><div class="dot" style="background:#1B2B3A;box-shadow:0 0 0 1.5px #fff">P</div><div class="addr" id="startTxt">—</div>
+        <div class="row"><button class="btn" id="pickStart" type="button" title="Klik daarna op de kaart">Kies</button><button class="btn" id="geo" type="button" title="Gebruik mijn locatie">⌖</button></div></div>
+      <div class="pt"><div class="dot" style="background:var(--magenta)">D</div><div class="addr" id="targetTxt">—</div>
+        <button class="btn" id="pickTarget" type="button">Kies</button></div>
+      <div class="note">Tip: klik ergens op de kaart om je bestemming te kiezen. Je startpunt (P) kun je verslepen.</div>
+    </section>
+
+    <section class="blk" aria-labelledby="h-flight">
+      <h2 id="h-flight">Vlucht</h2>
+      <label class="f"><span>Vlieghoogte boven startpunt <output id="altOut"></output></span><input type="range" id="alt" min="10" max="500" step="5" value="100"></label>
+      <label class="f">Snelheid
+        <div class="seg" id="speed"><button type="button" data-v="eco" aria-pressed="false">Zuinig</button><button type="button" data-v="normal" aria-pressed="true">Normaal</button><button type="button" data-v="sport" aria-pressed="false">Sport</button></div>
+      </label>
+      <div class="row">
+        <label class="f">Filmen bij doel (min)<input type="number" id="hover" min="0" max="30" step="0.5" value="2"></label>
+        <label class="f">Startaccu (%)<input type="number" id="startPct" min="20" max="100" step="1" value="100"></label>
+      </div>
+      <div class="row">
+        <label class="f">Landen met (%)<input type="number" id="reserve" min="0" max="50" step="1" value="20"></label>
+        <label class="f">Accugezondheid (%)<input type="number" id="health" min="50" max="100" step="1" value="100"></label>
+      </div>
+      <label class="f"><span>Hoogte van de piloot / controller <output id="pilotHOut"></output></span><input type="range" id="pilotH" min="1" max="60" step="0.5" value="1.5"></label>
+    </section>
+
+    <section class="blk" aria-labelledby="h-wx">
+      <h2 id="h-wx">Weer <span class="row"><select id="wxTime" aria-label="Tijdstip" style="width:auto;padding:3px 6px;font-size:12px"></select></span></h2>
+      <div class="wx">
+        <label class="f">Wind (m/s)<input type="number" id="windSpd" min="0" max="30" step="0.1" value="4"></label>
+        <label class="f">Uit (°)<input type="number" id="windDir" min="0" max="359" step="1" value="240"></label>
+        <label class="f">Temp (°C)<input type="number" id="temp" min="-20" max="45" step="1" value="12"></label>
+      </div>
+      <div class="note" id="wxNote">Weer wordt automatisch opgehaald (Open-Meteo) voor je vlieghoogte.</div>
+    </section>
+
+    <section class="blk" aria-labelledby="h-env">
+      <h2 id="h-env">Signaalomgeving</h2>
+      <select id="env"><option value="auto">Automatisch (uit bebouwing)</option></select>
+      <div class="note" id="envNote"></div>
+    </section>
+
+    <section class="blk" aria-labelledby="h-res">
+      <h2 id="h-res">Uitslag</h2>
+      <div class="verdict" id="verdict" data-s="">
+        <div class="big" id="vBig">Kies een bestemming</div>
+        <div class="meter"><div class="lbl"><span>Accu bij landing</span><b id="mBat">—</b></div><div class="bar"><i id="bBat"></i></div></div>
+        <div class="meter"><div class="lbl"><span>Zwakste signaal (marge)</span><b id="mSig">—</b></div><div class="bar"><i id="bSig"></i></div></div>
+        <ul class="why" id="why"></ul>
+      </div>
+    </section>
+
+    <section class="blk">
+      <details>
+        <summary>Hoe rekent dit?</summary>
+        <ul>
+          <li><b>Accu:</b> DJI-vliegtijd × accugezondheid × 0,9 (praktijkcorrectie uit reviews) × temperatuurfactor. Daarna rekenen we per stuk: klimmen, heen (met tegen-/meewind en zijwind), filmen, terug en dalen. Het vermogen hangt af van de snelheidsmodus.</li>
+          <li><b>Signaal:</b> we beginnen bij het DJI-bereik (CE of FCC) × de omgevingsfactor, geijkt op de DJI-tabellen (stad 1,5–4 km, buitenwijk 4–10 km bij O4). Obstakels kosten extra dB via een vrije-ruimte-linkbudget op 2,4 GHz. Elke dB verlies maakt het bereik 10<sup>-dB/20</sup> keer zo klein.</li>
+          <li><b>Obstakels:</b> gebouwen en bomen uit OpenStreetMap, hoogte uit de tags (of verdiepingen × 3 m, anders een standaardwaarde). Terrein komt uit AWS Terrain Tiles (SRTM/EU-DEM/AHN) en de aardkromming telt mee (k = 4/3). Per obstakel nemen we de kleinste van twee verliezen: <i>diffractie</i> over de rand (knife-edge, ITU-R P.526, Deygout) of <i>doordringing</i> (bomen ±0,45 dB/m, gebouw ±28 dB). Ter controle: DJI zelf geeft 0,7–4,5 km achter bomen en 0–0,7 km achter gebouwen.</li>
+          <li><b>Marge:</b> boven 6 dB is het signaal sterk, tussen 0 en 6 dB zwak (haperend beeld), onder 0 dB valt de verbinding weg en gaat de drone terug naar huis (RTH).</li>
+        </ul>
+        <p>Dit is een planningshulp, geen garantie. In de EU moet je de drone altijd zelf kunnen zien (VLOS) en mag je max 120 m hoog vliegen. Check no-fly-zones in de GoDrone-app.</p>
+      </details>
+      <details>
+        <summary>Bronnen</summary>
+        <ul id="sources"></ul>
+      </details>
+    </section>
+    <div class="foot">Kaart © OpenStreetMap-bijdragers · Luchtfoto © PDOK / Esri · Weer: Open-Meteo · Terrein: AWS Terrain Tiles · Obstakels: Overpass API</div>
+  </aside>
+
+  <main>
+    <div class="mapwrap">
+    <div id="map"></div>
+    <div class="overlay search">
+      <form id="searchForm" role="search"><input type="text" id="q" placeholder="Zoek een plek, adres of 52.37, 4.89" aria-label="Zoek een plek" autocomplete="off"><button class="btn primary" type="submit">Zoek</button></form>
+      <div class="results" id="results" hidden></div>
+    </div>
+    <div class="overlay layers">
+      <div class="seg" id="base"><button type="button" data-v="osm" aria-pressed="true">Kaart</button><button type="button" data-v="pdok" aria-pressed="false">Luchtfoto NL</button><button type="button" data-v="esri" aria-pressed="false">Satelliet</button></div>
+      <div class="seg" id="ovl"><button type="button" data-v="obst" aria-pressed="true">Obstakels</button><button type="button" data-v="reach" aria-pressed="true">Bereik</button></div>
+    </div>
+    <div class="overlay legend" id="legend">
+      <div><i style="border-top:2.5px dashed var(--blue)"></i>Accu: heen &amp; terug</div>
+      <div><i style="border-top:6px solid color-mix(in srgb,var(--magenta) 35%,transparent)"></i>Signaal sterk (&gt; 6 dB)</div>
+      <div><i style="border-top:2px solid var(--magenta)"></i>Signaal maximaal</div>
+      <div><i style="border-top:2px dotted var(--muted)"></i>Zichtgrens (schatting)</div>
+    </div>
+    <div class="overlay status" id="status" hidden></div>
+    <div class="overlay mode-hint" id="modeHint" hidden></div>
+    </div>
+    <div class="profile">
+      <header><h3>Hoogteprofiel &amp; zichtlijn</h3>
+        <div class="lg"><span><i style="background:var(--terrain)"></i>Terrein</span><span><i style="background:var(--bldg)"></i>Gebouw</span><span><i style="background:var(--tree)"></i>Bomen</span><span><i style="background:var(--magenta)"></i>Zichtlijn</span><span><i style="background:color-mix(in srgb,var(--blue) 25%,transparent)"></i>Fresnelzone</span></div>
+      </header>
+      <div class="canvases">
+        <div><div class="cap" id="profCap">Van jou (P) naar de bestemming (D)</div><canvas id="profileCv"></canvas></div>
+        <div><div class="cap">Signaalmarge onderweg (dB)</div><canvas id="marginCv"></canvas></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// DJI drone-database — officiële specs (DJI spec-pagina's) + praktijkcijfers uit reviews.
+// Velden:
+//  time      max vliegtijd (min) met standaard accu, DJI-test (constante snelheid, windstil, zeeniveau)
+//  plus      {time, eu} optionele Plus-accu; eu=false → niet verkocht/toegestaan in de EU
+//  sys       videoverbinding;  fcc / ce  max transmissie-afstand (km) onbelemmerd, zonder storing
+//  test      snelheid (m/s) waarbij DJI de vliegtijd meet (21,6 km/h = 6 m/s, 32,4 km/h = 9 m/s)
+//  normal / sport  max horizontale snelheid (m/s) in N- en S-modus
+//  wind      max windweerstand (m/s);  weight  startgewicht (g);  vlos  geschatte zichtafstand (m)
+//  src       officiële specpagina
+const DRONES = [
+  // ── Mini-serie ──────────────────────────────────────────────
+  { id:'mini5pro', name:'Mini 5 Pro', series:'Mini', year:2025, time:36, plus:{time:52, eu:false}, sys:'O4+', fcc:20, ce:10, test:6, normal:12, sport:18, wind:12, weight:249, vlos:350,
+    note:'C0-klasse. Plus-accu (52 min) wordt niet in Europa verkocht. DJI noemt zelf ~21 min als "typische" vliegtijd.',
+    src:'https://www.dji.com/mini-5-pro/specs' },
+  { id:'mini4pro', name:'Mini 4 Pro', series:'Mini', year:2023, time:34, plus:{time:45, eu:false}, sys:'O4', fcc:20, ce:10, test:6, normal:10, sport:16, wind:10.7, weight:249, vlos:350,
+    note:'Praktijk volgens reviews: 22–26 min bij lichte wind. DJI: stad 1,5–4 km, buitenwijk 4–10 km (FCC).',
+    src:'https://www.dji.com/mini-4-pro/specs' },
+  { id:'mini4k', name:'Mini 4K', series:'Mini', year:2024, time:31, sys:'O2', fcc:10, ce:6, test:6, normal:10, sport:16, wind:10.7, weight:249, vlos:350,
+    note:'Instapmodel met O2-verbinding: duidelijk gevoeliger voor bomen en gebouwen dan O4.',
+    src:'https://www.dji.com/mini-4k/specs' },
+  { id:'mini3pro', name:'Mini 3 Pro', series:'Mini', year:2022, time:34, plus:{time:47, eu:false}, sys:'O3', fcc:12, ce:8, test:6, normal:10, sport:16, wind:10.7, weight:249, vlos:350,
+    note:'O3 zendt live beeld in 1080p/30 tot 12 km (FCC).',
+    src:'https://www.dji.com/mini-3-pro/specs' },
+  { id:'mini3', name:'Mini 3', series:'Mini', year:2022, time:38, plus:{time:51, eu:false}, sys:'O2', fcc:10, ce:6, test:6, normal:10, sport:16, wind:10.7, weight:248, vlos:350,
+    note:'Langste vliegtijd van de oudere Mini\'s, maar met O2 (720p live beeld).',
+    src:'https://www.dji.com/mini-3/specs' },
+  { id:'mini2se', name:'Mini 2 SE', series:'Mini', year:2023, time:31, sys:'O2', fcc:10, ce:6, test:6, normal:10, sport:16, wind:10.7, weight:249, vlos:350,
+    note:'O2-verbinding, 31 min per accu.',
+    src:'https://www.dji.com/mini-2-se/specs' },
+  { id:'mini2', name:'Mini 2', series:'Mini', year:2020, time:31, sys:'OcuSync 2.0', fcc:10, ce:6, test:6, normal:10, sport:16, wind:10.7, weight:249, vlos:350,
+    note:'Oudere accu\'s hebben vaak nog maar 80–90% capaciteit: zet accugezondheid lager.',
+    src:'https://www.dji.com/mini-2/specs' },
+  { id:'minise', name:'Mini SE', series:'Mini', year:2020, time:30, sys:'Wi-Fi', fcc:4, ce:2, test:6, normal:8, sport:13, wind:8, weight:249, vlos:350,
+    note:'Wi-Fi-verbinding: veel korter bereik en zeer gevoelig voor storing.',
+    src:'https://www.dji.com/mini-se/specs' },
+  // ── Lito / Flip / Neo ───────────────────────────────────────
+  { id:'litox1', name:'Lito X1', series:'Lito', year:2026, time:36, plus:{time:52, eu:true}, sys:'O4', fcc:15, ce:8, test:6, normal:12, sport:18, wind:10.7, weight:249, vlos:350,
+    note:'In de EU mag de Plus-accu (52 min) met de Fly More Combo Plus. Max vliegafstand 21 km (32 km met Plus).',
+    src:'https://www.dji.com/global/lito-x1/specs' },
+  { id:'lito1', name:'Lito 1', series:'Lito', year:2026, time:36, sys:'O4', fcc:15, ce:8, test:6, normal:12, sport:18, wind:10.7, weight:249, vlos:350,
+    note:'Instapmodel uit april 2026, zelfde O4-verbinding als de X1.',
+    src:'https://www.dji.com/global/lito-1/specs' },
+  { id:'flip', name:'Flip', series:'Flip', year:2025, time:31, sys:'O4', fcc:13, ce:8, test:6, normal:10, sport:12, wind:10.7, weight:249, vlos:300,
+    note:'Opvouwbare propellerkooi; langzamer dan de Mini-serie (max 12 m/s), dus terugvliegen tegen de wind in kost meer tijd.',
+    src:'https://www.dji.com/flip/specs' },
+  { id:'neo2', name:'Neo 2 (met RC-N3)', series:'Neo', year:2025, time:19, sys:'O4 (transceiver)', fcc:10, ce:6, test:5, normal:8, sport:12, wind:8, weight:160, vlos:250,
+    note:'Met alleen de telefoon (Wi-Fi) is het bereik ~500 m. De O4-transceiver + RC-N3 geeft 6 km (CE).',
+    src:'https://www.dji.com/neo-2/specs' },
+  { id:'neo', name:'Neo (met RC-N3)', series:'Neo', year:2024, time:18, sys:'O4 (RC-N3)', fcc:10, ce:6, test:5, normal:6, sport:8, wind:8, weight:135, vlos:250,
+    note:'Via de telefoon (Wi-Fi) maar ~50 m. Met RC-N3: 6 km (CE). Lage snelheid: wind is snel een probleem.',
+    src:'https://www.dji.com/neo/specs' },
+  // ── Air-serie ───────────────────────────────────────────────
+  { id:'air3s', name:'Air 3S', series:'Air', year:2024, time:45, sys:'O4', fcc:20, ce:10, test:9, normal:12, sport:21, wind:12, weight:724, vlos:500,
+    note:'Hoveren max 41 min. DJI: stad 1,5–4 km, buitenwijk 4–10 km. CE zendvermogen 5,8 GHz < 14 dBm (FCC < 33 dBm).',
+    src:'https://www.dji.com/air-3s/specs' },
+  { id:'air3', name:'Air 3', series:'Air', year:2023, time:46, sys:'O4', fcc:20, ce:10, test:9, normal:12, sport:21, wind:12, weight:720, vlos:500,
+    note:'Vliegtijd gemeten bij 32,4 km/h constant.',
+    src:'https://www.dji.com/air-3/specs' },
+  { id:'air2s', name:'Air 2S', series:'Air', year:2021, time:31, sys:'O3', fcc:12, ce:8, test:9, normal:15, sport:19, wind:10.7, weight:595, vlos:500,
+    note:'Reviews melden vaak 22–25 min echte vliegtijd.',
+    src:'https://www.dji.com/air-2s/specs' },
+  { id:'mavicair2', name:'Mavic Air 2', series:'Air', year:2020, time:34, sys:'OcuSync 2.0', fcc:10, ce:6, test:9, normal:12, sport:19, wind:10.7, weight:570, vlos:500,
+    note:'OcuSync 2.0 (2,4 + 5,8 GHz).',
+    src:'https://www.dji.com/mavic-air-2/specs' },
+  // ── Mavic-serie ─────────────────────────────────────────────
+  { id:'mavic4pro', name:'Mavic 4 Pro', series:'Mavic', year:2025, time:51, sys:'O4+', fcc:30, ce:15, test:9, normal:18, sport:25, wind:12, weight:1063, vlos:650,
+    note:'51 min gemeten bij 32,4 km/h. Langste vliegtijd van alle DJI-cameradrones.',
+    src:'https://www.dji.com/mavic-4-pro/specs' },
+  { id:'mavic3pro', name:'Mavic 3 Pro', series:'Mavic', year:2023, time:43, sys:'O3+', fcc:15, ce:8, test:9, normal:15, sport:21, wind:12, weight:958, vlos:650,
+    note:'Gebruikers melden ~30 min van 100% naar 15% met een nieuwe accu.',
+    src:'https://www.dji.com/mavic-3-pro/specs' },
+  { id:'mavic3', name:'Mavic 3 / Classic', series:'Mavic', year:2021, time:46, sys:'O3+', fcc:15, ce:8, test:9, normal:15, sport:21, wind:12, weight:895, vlos:650,
+    note:'O3+ (2,4 + 5,8 GHz).',
+    src:'https://www.dji.com/mavic-3-classic/specs' },
+  { id:'mavic2', name:'Mavic 2 Pro / Zoom', series:'Mavic', year:2018, time:31, sys:'OcuSync 2.0', fcc:8, ce:5, test:9, normal:14, sport:20, wind:10, weight:907, vlos:600,
+    note:'Oudere generatie; accu\'s zijn vaak flink verouderd.',
+    src:'https://www.dji.com/mavic-2/info' },
+  // ── FPV / Avata ─────────────────────────────────────────────
+  { id:'avata360', name:'Avata 360', series:'FPV', year:2026, time:23, sys:'O4+', fcc:20, ce:10, test:6, normal:16, sport:18, wind:10.7, weight:455, vlos:400,
+    note:'DJI: stad 1,5–5 km, buitenwijk 5–12 km. Vliegtijd geldt alleen bij bepaalde cameramodi.',
+    src:'https://www.dji.com/avata-360/specs' },
+  { id:'avata2', name:'Avata 2', series:'FPV', year:2024, time:23, sys:'O4', fcc:13, ce:10, test:6, normal:8, sport:16, wind:10.7, weight:377, vlos:400,
+    note:'Reviews: realistisch 18–20 min. Handmatige modus tot 27 m/s (met RC Motion/FPV RC 3).',
+    src:'https://www.dji.com/avata-2/specs' },
+  { id:'avata', name:'Avata', series:'FPV', year:2022, time:18, sys:'O3+', fcc:10, ce:2, test:6, normal:8, sport:14, wind:10.7, weight:410, vlos:400,
+    note:'Let op: in CE-modus maar 2 km bereik.',
+    src:'https://www.dji.com/avata/specs' },
+  { id:'fpv', name:'DJI FPV', series:'FPV', year:2021, time:20, sys:'O3', fcc:10, ce:6, test:9, normal:15, sport:27, wind:13, weight:795, vlos:500,
+    note:'Handmatig tot 39 m/s, dan is de accu wel heel snel leeg.',
+    src:'https://www.dji.com/dji-fpv/specs' },
+  // ── Pro / Enterprise ────────────────────────────────────────
+  { id:'matrice4', name:'Matrice 4E / 4T', series:'Enterprise', year:2025, time:49, sys:'O4 Enterprise', fcc:25, ce:12, test:10, normal:15, sport:21, wind:12, weight:1219, vlos:700,
+    note:'Professionele drone, vaak met 4G-dongle als back-upverbinding.',
+    src:'https://enterprise.dji.com/matrice-4-series/specs' },
+  { id:'mavic3e', name:'Mavic 3 Enterprise / Thermal', series:'Enterprise', year:2022, time:45, sys:'O3 Enterprise', fcc:15, ce:8, test:9, normal:15, sport:21, wind:12, weight:915, vlos:650,
+    note:'Hoveren ~38 min.',
+    src:'https://enterprise.dji.com/mavic-3-enterprise/specs' },
+  { id:'p4pv2', name:'Phantom 4 Pro V2.0', series:'Phantom', year:2018, time:30, sys:'OcuSync 2.0', fcc:8, ce:5, test:9, normal:14, sport:20, wind:10, weight:1375, vlos:700,
+    note:'Klassieker. Accu\'s zijn vaak oud, dus houd rekening met minder capaciteit.',
+    src:'https://www.dji.com/phantom-4-pro-v2/info' },
+];
+
+// Signaalomgeving: factor op het maximale bereik door storing (Wi-Fi, 4G, andere zenders).
+// Geijkt op de DJI-tabellen voor O4: sterke storing (stad) 1,5–4 km, medium (buitenwijk) 4–10 km,
+// weinig (platteland/kust) 10–20 km — t.o.v. 20 km onbelemmerd.
+const ENVIRONMENTS = {
+  stad:     { label:'Stad (veel storing)',            f:0.15 },
+  wijk:     { label:'Buitenwijk / dorp',              f:0.35 },
+  landelijk:{ label:'Landelijk',                      f:0.65 },
+  open:     { label:'Open veld / water',              f:0.90 },
+};
+
+</script>
+<script>
+'use strict';
+/* DJI Bereikplanner — accu- en signaalberekening met gebouwen, bomen en terrein. */
+
+const $ = s => document.querySelector(s);
+const LAMBDA = 0.125;              // golflengte 2,4 GHz (m) — de band die DJI kiest bij obstakels
+const K_EARTH = 4 / 3, R_EARTH = 6371000;
+const AREA_RADIUS = 800;           // obstakels rond de piloot (m)
+const BEARINGS = 72, T_BEARINGS = 72, T_SAMPLES = 60;
+const PEN_BUILDING = 28, PEN_TREE_PER_M = 0.45, PEN_TREE_MAX = 35;
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+
+const state = {
+  drone: DRONES.find(d => d.id === 'mini4pro'), battery: 'std', region: 'ce', speed: 'normal', env: 'auto', envAuto: null, coverage: null,
+  start: { lat: 51.97480, lng: 5.89350, name: 'Meinerswijk, Arnhem', example: true },
+  target: { lat: 51.99295, lng: 5.89870, name: 'Sonsbeekpark, Arnhem', example: true },
+  wx: null, manualWx: false,
+  area: null, route: null, pick: null,
+};
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+/* ── geo-hulpjes ─────────────────────────────────────────────── */
+const toRad = d => d * Math.PI / 180, toDeg = r => r * 180 / Math.PI;
+function proj(o) { const c = Math.cos(toRad(o.lat)) * 111320; return { fwd: (lat, lng) => [(lng - o.lng) * c, (lat - o.lat) * 110574], inv: (x, y) => [o.lat + y / 110574, o.lng + x / c] }; }
+function haversine(a, b) { const dLa = toRad(b.lat - a.lat), dLo = toRad(b.lng - a.lng); const s = Math.sin(dLa / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLo / 2) ** 2; return 2 * 6371000 * Math.asin(Math.sqrt(s)); }
+const fmtKm = m => m >= 1000 ? (m / 1000).toFixed(m >= 10000 ? 1 : 2).replace('.', ',') + ' km' : Math.round(m) + ' m';
+const fmt1 = v => v.toFixed(1).replace('.', ',');
+const compass = deg => ['N', 'NO', 'O', 'ZO', 'Z', 'ZW', 'W', 'NW'][Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+
+/* ── netwerk ─────────────────────────────────────────────────── */
+function setStatus(t) { const s = $('#status'); s.hidden = !t; s.textContent = t || ''; }
+// Overpass staat per gebruiker maar 1–2 gelijktijdige verzoeken toe: één voor één, met geheugen-cache.
+const opCache = new Map(); let opChain = Promise.resolve();
+function overpass(q) {
+  if (opCache.has(q)) return opCache.get(q);
+  const p = opChain.then(() => overpassRace(q));
+  opChain = p.catch(() => { }); opCache.set(q, p); p.catch(() => opCache.delete(q));
+  return p;
+}
+// Openbare Overpass-servers zijn soms overbelast: vraag ze tegelijk, de snelste wint.
+async function overpassRace(q) {
+  const ctrls = OVERPASS.map(() => new AbortController());
+  const timer = setTimeout(() => ctrls.forEach(c => c.abort()), 75000);
+  try {
+    return await Promise.any(OVERPASS.map(async (url, i) => {
+      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctrls[i].signal });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      if (j.remark && /runtime error|timed out/i.test(j.remark) && !j.elements?.length) throw new Error(j.remark);
+      ctrls.forEach((c, k) => k !== i && c.abort());
+      return j;
+    }));
+  } finally { clearTimeout(timer); }
+}
+// Terreinhoogte uit AWS Terrain Tiles (Terrarium-PNG: hoogte = R·256 + G + B/256 − 32768).
+// Bronnen o.a. SRTM, EU-DEM en AHN (NL) — geen API-limiet, dus we kunnen veel punten bemonsteren.
+const tileCache = new Map();
+const ekey = p => p.lat.toFixed(6) + ',' + p.lng.toFixed(6);
+function tileXY(lat, lng, z) { const n = 2 ** z, la = toRad(lat); return [(lng + 180) / 360 * n, (1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2 * n]; }
+function loadTile(z, x, y) {
+  const k = `${z}/${x}/${y}`; if (tileCache.has(k)) return tileCache.get(k);
+  const p = new Promise(res => {
+    const img = new Image(); img.crossOrigin = 'anonymous';
+    img.onload = () => { const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d'); g.drawImage(img, 0, 0); const d = g.getImageData(0, 0, 256, 256).data, e = new Float32Array(65536); for (let i = 0; i < 65536; i++) e[i] = d[i * 4] * 256 + d[i * 4 + 1] + d[i * 4 + 2] / 256 - 32768; res(e); };
+    img.onerror = () => { tileCache.delete(k); res(null); };
+    img.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${k}.png`;
+  });
+  tileCache.set(k, p); return p;
+}
+async function elevations(pts) {
+  if (!pts.length) return [];
+  let la0 = 90, la1 = -90, lo0 = 180, lo1 = -180; for (const [a, b] of pts) { la0 = Math.min(la0, a); la1 = Math.max(la1, a); lo0 = Math.min(lo0, b); lo1 = Math.max(lo1, b); }
+  const spanM = Math.max((la1 - la0) * 110574, (lo1 - lo0) * 111320 * Math.cos(toRad(la0)));
+  const z = spanM < 4000 ? 14 : spanM < 9000 ? 13 : spanM < 20000 ? 12 : spanM < 45000 ? 11 : 10;
+  const need = new Set(pts.map(([a, b]) => { const [x, y] = tileXY(a, b, z); return `${Math.floor(x)}/${Math.floor(y)}`; }));
+  const tiles = new Map(await Promise.all([...need].map(async k => { const [x, y] = k.split('/').map(Number); return [k, await loadTile(z, x, y)]; })));
+  return pts.map(([a, b]) => {
+    const [x, y] = tileXY(a, b, z), t = tiles.get(`${Math.floor(x)}/${Math.floor(y)}`); if (!t) return NaN;
+    const px = Math.min(255, Math.floor((x % 1) * 256)), py = Math.min(255, Math.floor((y % 1) * 256)), v = t[py * 256 + px];
+    return v < -1000 ? 0 : v;
+  });
+}
+
+/* ── obstakels uit OpenStreetMap ──────────────────────────────── */
+const B_DEFAULT = { house: 8, detached: 8, semidetached_house: 8, terrace: 9, bungalow: 5, residential: 10, apartments: 15, dormitory: 15, garage: 3, garages: 3, shed: 3, hut: 3, cabin: 4, roof: 5, carport: 3, greenhouse: 4, industrial: 10, warehouse: 10, commercial: 12, retail: 8, supermarket: 7, office: 16, church: 18, chapel: 8, cathedral: 30, school: 10, university: 15, hospital: 18, barn: 8, farm_auxiliary: 7, cowshed: 6, stable: 6, service: 4, hangar: 12, hotel: 18, train_station: 12, stadium: 25, parking: 10, kiosk: 3, toilets: 3, transformer_tower: 6 };
+function heightOf(t) {
+  let h = parseFloat(t.height) || parseFloat(t['building:height']), src = 'tag';
+  if (!h && t.building) {
+    if (t['building:levels']) { h = parseFloat(t['building:levels']) * 3 + (t['roof:levels'] ? parseFloat(t['roof:levels']) * 2.5 : 1.5); src = 'verdiepingen'; }
+    else { h = B_DEFAULT[t.building] ?? 7; src = 'schatting'; }
+  }
+  if (!h) { h = t.natural === 'tree' ? 12 : t.natural === 'tree_row' ? 12 : 15; src = 'schatting'; }
+  return { h: Math.min(h, 400), src };
+}
+function parseOsm(json, P) {
+  const out = [];
+  for (const el of json.elements || []) {
+    const t = el.tags || {}, kind = t.building ? 'b' : 't', { h, src } = heightOf(t);
+    const label = t.name || (t['addr:street'] ? `${t['addr:street']} ${t['addr:housenumber'] || ''}`.trim() : null);
+    const base = { id: el.type[0] + el.id, kind, h, src, label, btype: t.building };
+    if (el.type === 'node') { const [x, y] = P.fwd(el.lat, el.lon); const r = (parseFloat(t.diameter_crown) || 8) / 2; out.push({ ...base, shape: 'c', cx: x, cy: y, r, bb: [x - r, y - r, x + r, y + r], ll: [[el.lat, el.lon]] }); continue; }
+    const rings = el.type === 'way' ? [el.geometry] : (el.members || []).filter(m => m.role !== 'inner' && m.geometry).map(m => m.geometry);
+    for (const g of rings) {
+      if (!g || g.length < 2) continue;
+      const pts = g.map(p => P.fwd(p.lat, p.lon)), xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+      const line = t.natural === 'tree_row';
+      const pad = line ? 4 : 0;
+      out.push({ ...base, shape: line ? 'l' : 'p', pts, hw: 4, bb: [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad], ll: g.map(p => [p.lat, p.lon]) });
+    }
+  }
+  return out;
+}
+function inside(o, x, y) {
+  if (x < o.bb[0] || x > o.bb[2] || y < o.bb[1] || y > o.bb[3]) return false;
+  if (o.shape === 'c') return (x - o.cx) ** 2 + (y - o.cy) ** 2 <= o.r * o.r;
+  const p = o.pts;
+  if (o.shape === 'l') {
+    for (let i = 1; i < p.length; i++) { const [ax, ay] = p[i - 1], [bx, by] = p[i]; const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy || 1; const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L)); if ((ax + t * dx - x) ** 2 + (ay + t * dy - y) ** 2 <= o.hw * o.hw) return true; }
+    return false;
+  }
+  let c = false;
+  for (let i = 0, j = p.length - 1; i < p.length; j = i++) { const [xi, yi] = p[i], [xj, yj] = p[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; }
+  return c;
+}
+function makeIndex(objs, ext, cell = 50) {
+  const g = new Map();
+  for (let n = 0; n < objs.length; n++) {
+    const b = objs[n].bb;
+    const i0 = Math.floor(Math.max(b[0], ext[0]) / cell), i1 = Math.floor(Math.min(b[2], ext[2]) / cell);
+    const j0 = Math.floor(Math.max(b[1], ext[1]) / cell), j1 = Math.floor(Math.min(b[3], ext[3]) / cell);
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const k = i + ',' + j; (g.get(k) || g.set(k, []).get(k)).push(n); }
+  }
+  return { objs, query(x, y) { const a = g.get(Math.floor(x / cell) + ',' + Math.floor(y / cell)); if (!a) return null; let best = null; for (const n of a) { const o = objs[n]; if ((!best || o.h > best.h) && inside(o, x, y)) best = o; } return best; } };
+}
+const OSM_FILTERS = ['way["building"]', 'relation["building"]', 'way["natural"="wood"]', 'relation["natural"="wood"]', 'way["landuse"="forest"]', 'relation["landuse"="forest"]', 'way["natural"="tree_row"]', 'node["natural"="tree"]'];
+
+/* ── radiopropagatie ─────────────────────────────────────────── */
+const J = v => v <= -0.78 ? 0 : 6.9 + 20 * Math.log10(Math.sqrt((v - 0.1) ** 2 + 1) + v - 0.1);  // ITU-R P.526 knife-edge
+function maxEdge(xs, zs, i0, i1, x0, y0, x1, y1) {
+  let bv = -Infinity, bi = -1; const D = x1 - x0;
+  for (let i = i0; i < i1; i++) { const x = xs[i]; if (x <= x0 || x >= x1) continue; const d1 = x - x0, d2 = x1 - x; const v = (zs[i] - (y0 + (y1 - y0) * d1 / D)) * Math.sqrt(2 * D / (LAMBDA * d1 * d2)); if (v > bv) { bv = v; bi = i; } }
+  return { v: bv, i: bi };
+}
+function deygout(xs, zs, n, x1, yP, yD) {
+  const m = maxEdge(xs, zs, 0, n, 0, yP, x1, yD);
+  if (m.i < 0 || m.v <= -0.78) return { L: 0, i: m.i, v: m.v };
+  const xm = xs[m.i], zm = zs[m.i];
+  const a = maxEdge(xs, zs, 0, m.i, 0, yP, xm, zm), b = maxEdge(xs, zs, m.i + 1, n, xm, zm, x1, yD);
+  return { L: J(m.v) + (a.i >= 0 ? J(a.v) : 0) + (b.i >= 0 ? J(b.v) : 0), i: m.i, v: m.v };
+}
+// Profiel: xs (afstand vanaf piloot), g (terreinhoogte), ob (object), allemaal even lang.
+function buildProfile(dx, dy, maxD, index, groundAt, fineMax, fineStep) {
+  const xs = [], g = [], ob = [];
+  const coarse = Math.max(25, maxD / 400);
+  for (let s = fineStep; s <= maxD + 1e-6;) {
+    xs.push(s); g.push(groundAt(s)); ob.push(s <= fineMax && index ? index.query(dx * s, dy * s) : null);
+    s += s < fineMax ? fineStep : coarse;
+  }
+  return { xs, g, ob };
+}
+// Verlies (dB) voor een drone op afstand d. hP / hD = absolute hoogtes piloot en drone.
+function linkLoss(pr, d, hP, hD, detail = false) {
+  const { xs, g, ob } = pr; let n = 0; while (n < xs.length && xs[n] < d) n++;
+  const zAll = new Float64Array(n), zTer = new Float64Array(n);
+  for (let i = 0; i < n; i++) { const bulge = xs[i] * (d - xs[i]) / (2 * K_EARTH * R_EARTH); zTer[i] = g[i] + bulge; zAll[i] = zTer[i] + (ob[i] ? ob[i].h : 0); }
+  const A = deygout(xs, zAll, n, d, hP, hD), T = deygout(xs, zTer, n, d, hP, hD);
+  // Doordringingspad: terrein via diffractie + elk object (rij aaneengesloten samples) apart.
+  let pen = 0; const runs = [];
+  for (let i = 0; i < n;) {
+    const o = ob[i]; if (!o) { i++; continue; }
+    let j = i, depth = 0, bv = -Infinity, step = 0;
+    while (j < n && ob[j] === o) {
+      const x = xs[j], los = hP + (hD - hP) * x / d, over = zAll[j] - los;
+      step = j + 1 < xs.length ? xs[j + 1] - x : step;
+      if (over > 0) depth += step || 4;
+      const v = over * Math.sqrt(2 * d / (LAMBDA * x * (d - x))); if (v > bv) bv = v;
+      j++;
+    }
+    // Per object: het makkelijkste van "eroverheen buigen" (diffractie) of "erdoorheen" (doordringing).
+    const through = o.kind === 'b' ? PEN_BUILDING : Math.min(PEN_TREE_MAX, Math.max(3, depth * PEN_TREE_PER_M));
+    const loss = depth > 0 ? Math.min(J(bv), through) : J(bv);
+    if (loss > 0.05) runs.push({ o, x: xs[i], depth, loss });
+    pen += loss; i = j;
+  }
+  const B = T.L + pen;
+  const L = Math.min(A.L, B);
+  if (!detail) return L;
+  const terrainBlock = T.i >= 0 && T.v > 0;
+  return { L, terrainLoss: T.L, terrainBlock, terrainX: T.i >= 0 ? xs[T.i] : null, runs: runs.sort((a, b) => b.loss - a.loss), viaDiffraction: A.L < B };
+}
+
+/* ── modellen ────────────────────────────────────────────────── */
+const specKm = d => state.region === 'fcc' ? d.fcc : d.ce;
+const envKey = () => state.env === 'auto' ? (state.envAuto || 'wijk') : state.env;
+const R0 = () => specKm(state.drone) * 1000 * ENVIRONMENTS[envKey()].f;
+function tempFactor(t) { const pts = [[-20, 0.5], [-10, 0.65], [0, 0.8], [5, 0.88], [10, 0.94], [15, 0.98], [20, 1], [40, 1]]; for (let i = 1; i < pts.length; i++) if (t <= pts[i][0]) { const [a, fa] = pts[i - 1], [b, fb] = pts[i]; return fa + (fb - fa) * (Math.max(t, a) - a) / (b - a); } return 1; }
+function speedInfo() {
+  const d = state.drone, v = state.speed === 'eco' ? d.test : state.speed === 'sport' ? d.sport * 0.95 : d.normal;
+  const r = Math.max(0, v / d.test - 1); return { v, P: 1 + 0.25 * r + 0.12 * r * r };
+}
+function params() {
+  const n = id => parseFloat($(id).value);
+  return { alt: n('#alt'), hover: Math.max(0, n('#hover') || 0), startPct: n('#startPct') || 100, reserve: n('#reserve') || 0, health: n('#health') || 100, pilotH: n('#pilotH'), wind: Math.max(0, n('#windSpd') || 0), windFrom: n('#windDir') || 0, temp: isNaN(n('#temp')) ? 15 : n('#temp') };
+}
+function battery(p, bearingDeg, D) {
+  const d = state.drone, T = state.battery === 'plus' && d.plus ? d.plus.time : d.time;
+  const full = T * p.health / 100 * 0.9 * tempFactor(p.temp);           // "testvermogen-minuten" in een volle accu
+  const { v, P } = speedInfo();
+  const to = toRad(p.windFrom + 180 - bearingDeg), along = p.wind * Math.cos(to), cross = p.wind * Math.sin(to);
+  const air = v * v - cross * cross;
+  const gOut = air > 0 ? along + Math.sqrt(air) : -1, gBack = air > 0 ? -along + Math.sqrt(air) : -1;
+  const climb = p.alt / 5 / 60 * 1.3 + p.alt / 3.5 / 60 * 0.9, hov = p.hover * 1.1;
+  const res = { full, v, P, gOut, gBack, climb, hov, T };
+  if (gOut <= 0.3 || gBack <= 0.3) return { ...res, impossible: true, reach: 0 };
+  const avail = full * (p.startPct - p.reserve) / 100 - climb - hov;
+  res.reach = Math.max(0, avail * 60 / P / (1 / gOut + 1 / gBack));
+  if (D != null) {
+    res.tOut = D / gOut / 60; res.tBack = D / gBack / 60;
+    res.used = (res.tOut + res.tBack) * P + climb + hov;
+    res.land = p.startPct - res.used / full * 100;
+  }
+  return res;
+}
+
+/* ── kaart ───────────────────────────────────────────────────── */
+const map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([state.start.lat, state.start.lng], 14);
+const bases = {
+  osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }),
+  pdok: L.tileLayer('https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg', { maxZoom: 19, maxNativeZoom: 19, attribution: '© PDOK' }),
+  esri: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: '© Esri' }),
+};
+let curBase = bases.osm.addTo(map);
+const reachLayer = L.layerGroup().addTo(map), obstLayer = L.layerGroup().addTo(map), routeLayer = L.layerGroup().addTo(map);
+const pin = (txt, color) => L.divIcon({ className: '', html: `<div class="marker-pin" style="background:${color}"><span>${txt}</span></div>`, iconSize: [26, 26], iconAnchor: [13, 30] });
+const startM = L.marker([state.start.lat, state.start.lng], { draggable: true, icon: pin('P', '#1B2B3A'), zIndexOffset: 1000 }).addTo(map);
+const targetM = L.marker([state.target.lat, state.target.lng], { draggable: true, icon: pin('D', css('--magenta')), zIndexOffset: 900 }).addTo(map);
+startM.on('dragend', () => { const ll = startM.getLatLng(); setStart({ lat: ll.lat, lng: ll.lng, name: null }); });
+targetM.on('dragend', () => { const ll = targetM.getLatLng(); setTarget({ lat: ll.lat, lng: ll.lng, name: null }); });
+map.on('click', e => { const p = { lat: e.latlng.lat, lng: e.latlng.lng, name: null }; if (state.pick === 'start') setStart(p); else setTarget(p); setPick(null); });
+
+function setPick(m) { state.pick = m; $('#pickStart').classList.toggle('active', m === 'start'); $('#pickTarget').classList.toggle('active', m === 'target'); const h = $('#modeHint'); h.hidden = !m; h.textContent = m === 'start' ? 'Klik op de kaart waar je opstijgt' : 'Klik op de kaart waar je heen wilt'; }
+async function reverse(p, el) {
+  try { const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${p.lat}&lon=${p.lng}&zoom=17&accept-language=nl`); const j = await r.json(); const a = j.address || {}; p.name = [a.road && (a.road + (a.house_number ? ' ' + a.house_number : '')), a.village || a.town || a.city].filter(Boolean).join(', ') || j.display_name; } catch { p.name = 'Gekozen punt'; }
+  renderPts();
+}
+function renderPts() {
+  const s = state.start, t = state.target;
+  $('#startTxt').innerHTML = `${esc(s.name || 'Bezig…')}${s.example ? ' <em>(voorbeeld)</em>' : ''}<small>${s.lat.toFixed(5)}, ${s.lng.toFixed(5)}</small>`;
+  $('#targetTxt').innerHTML = t ? `${esc(t.name || 'Bezig…')}${t.example ? ' <em>(voorbeeld)</em>' : ''}<small>${t.lat.toFixed(5)}, ${t.lng.toFixed(5)} · ${fmtKm(haversine(s, t))}</small>` : 'Klik op de kaart';
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function setStart(p) { state.start = p; startM.setLatLng([p.lat, p.lng]); if (!p.name) reverse(p); renderPts(); state.area = null; state.route = null; loadWeather(); loadArea(); loadRoute(); }
+function setTarget(p) { state.target = p; targetM.setLatLng([p.lat, p.lng]); if (!targetM._map) targetM.addTo(map); if (!p.name) reverse(p); renderPts(); state.route = null; loadRoute(); }
+
+/* ── laden: gebied rond piloot ───────────────────────────────── */
+let areaSeq = 0, routeSeq = 0;
+async function loadArea() {
+  const seq = ++areaSeq, S = { ...state.start }, P = proj(S);
+  const ext = [-AREA_RADIUS - 60, -AREA_RADIUS - 60, AREA_RADIUS + 60, AREA_RADIUS + 60];
+  // Stap 1: terrein (snel) → al rekenen. Stap 2: gebouwen en bomen erbij.
+  state.area = { S, P, objs: [], index: makeIndex([], ext), terrain: null, tR: 0, obsState: 'laden' };
+  const q = `[out:json][timeout:50];(${OSM_FILTERS.map(f => `${f}(around:${AREA_RADIUS},${S.lat},${S.lng});`).join('')});out geom qt;`;
+  const prom = overpass(q).then(j => parseOsm(j, P));
+  state.areaObs = { key: ekey(S), prom };
+  await ensureAreaTerrain();
+  if (seq !== areaSeq) return;
+  recompute();
+  setStatus('Gebouwen en bomen rond je startpunt laden…');
+  let objs = [], obsState = 'ok';
+  try { objs = await prom; } catch (e) { obsState = 'mislukt'; }
+  if (seq !== areaSeq) return;
+  let area = 0;
+  for (const o of objs) if (o.kind === 'b' && o.shape === 'p') { const p = o.pts; let a = 0; for (let i = 0, j = p.length - 1; i < p.length; j = i++) a += (p[j][0] + p[i][0]) * (p[j][1] - p[i][1]); const cx = (o.bb[0] + o.bb[2]) / 2, cy = (o.bb[1] + o.bb[3]) / 2; if (cx * cx + cy * cy < AREA_RADIUS ** 2) area += Math.abs(a / 2); }
+  // Bebouwingsgraad binnen 800 m ≈ hoeveel Wi-Fi/4G-storing er is.
+  const cov = area / (Math.PI * AREA_RADIUS ** 2);
+  state.coverage = cov; state.envAuto = cov > 0.20 ? 'stad' : cov > 0.07 ? 'wijk' : cov > 0.015 ? 'landelijk' : 'open';
+  Object.assign(state.area, { objs, index: makeIndex(objs, ext), obsState });
+  if (obsState === 'mislukt') { state.envAuto = null; state.coverage = null; }
+  await ensureAreaTerrain();
+  if (seq !== areaSeq) return;
+  setStatus(obsState === 'mislukt' ? 'Gebouwen laden mislukt (OSM-servers druk). Ik reken zonder gebouwen, probeer het straks opnieuw.' : '');
+  if (obsState === 'mislukt') setTimeout(() => setStatus(''), 6000);
+  recompute();
+}
+async function ensureAreaTerrain() {
+  const A = state.area; if (!A) return;
+  const need = Math.max(R0(), 1500);
+  if (A.terrain && A.tR >= need * 0.999) return;
+  const R = Math.min(need * 1.15, 40000), pts = [[A.S.lat, A.S.lng]];
+  for (let b = 0; b < T_BEARINGS; b++) { const a = toRad(b * 360 / T_BEARINGS); for (let k = 1; k < T_SAMPLES; k++) { const s = R * k / (T_SAMPLES - 1); pts.push(A.P.inv(Math.sin(a) * s, Math.cos(a) * s)); } }
+  const el = await elevations(pts);
+  const g0 = isNaN(el[0]) ? 0 : el[0];
+  A.ground0 = g0; A.tR = R;
+  A.terrain = []; for (let b = 0; b < T_BEARINGS; b++) { const row = [g0]; for (let k = 1; k < T_SAMPLES; k++) { const v = el[1 + b * (T_SAMPLES - 1) + k - 1]; row.push(isNaN(v) ? g0 : v); } A.terrain.push(row); }
+  setStatus('');
+}
+function areaGround(bDeg) {
+  const A = state.area, row = A.terrain[Math.round(bDeg / (360 / T_BEARINGS)) % T_BEARINGS], step = A.tR / (T_SAMPLES - 1);
+  return s => { const f = Math.min(s / step, T_SAMPLES - 1.0001), i = Math.floor(f); return row[i] + (row[i + 1] - row[i]) * (f - i); };
+}
+
+/* ── laden: route naar bestemming ────────────────────────────── */
+async function loadRoute() {
+  if (!state.target) return;
+  const seq = ++routeSeq, S = { ...state.start }, Tg = { ...state.target }, P = proj(S), D = haversine(S, Tg);
+  const [tx, ty] = P.fwd(Tg.lat, Tg.lng), dx = tx / Math.hypot(tx, ty), dy = ty / Math.hypot(tx, ty);
+  if (D < 5) return;
+  setStatus('Hoogteprofiel ophalen…');
+  const nT = Math.min(1500, Math.max(30, Math.ceil(D / 15))), pts = [];
+  for (let i = 0; i <= nT; i++) pts.push(P.inv(tx * i / nT, ty * i / nT));
+  const el = await elevations(pts);
+  if (seq !== routeSeq) return;
+  const g0 = isNaN(el[0]) ? 0 : el[0], ter = el.map(v => isNaN(v) ? g0 : v);
+  const groundAt = s => { const f = Math.min(s / D * nT, nT - 0.0001), i = Math.floor(f); return ter[i] + (ter[i + 1] - ter[i]) * (f - i); };
+  const ext = [Math.min(0, tx) - 60, Math.min(0, ty) - 60, Math.max(0, tx) + 60, Math.max(0, ty) + 60];
+  const fineStep = D > 8000 ? D / 2000 : 4;
+  const base = { S, Tg, P, D, ground0: g0, groundAt, bearing: (toDeg(Math.atan2(dx, dy)) + 360) % 360 };
+  state.route = { ...base, objs: [], profile: buildProfile(dx, dy, D, null, groundAt, D, fineStep), obsState: 'laden' };
+  recompute();
+  setStatus('Gebouwen en bomen langs de route laden…');
+  let objs = [], obsState = 'ok';
+  // Dichtbij: hergebruik de obstakels rond het startpunt (zelfde projectie). Verderop: alleen een corridor opvragen.
+  const nearTo = Math.min(D, AREA_RADIUS - 40);
+  const nearCorr = o => { const cx = (o.bb[0] + o.bb[2]) / 2, cy = (o.bb[1] + o.bb[3]) / 2, r = Math.hypot(o.bb[2] - o.bb[0], o.bb[3] - o.bb[1]) / 2; const s = cx * dx + cy * dy; return s > -r && s < nearTo + r && Math.abs(cx * dy - cy * dx) < 25 + r; };
+  try {
+    if (state.areaObs && state.areaObs.key === ekey(S)) objs = (await state.areaObs.prom).filter(nearCorr);
+  } catch (e) { obsState = 'mislukt'; }
+  if (D > nearTo + 1 && obsState === 'ok') {
+    if (D < 40000) {
+      try {
+        const s0 = nearTo - 20, n = Math.max(1, Math.ceil((D - s0) / 2000)), line = [];
+        for (let i = 0; i <= n; i++) { const s = s0 + (D - s0) * i / n, [la, lo] = P.inv(dx * s, dy * s); line.push(la.toFixed(5), lo.toFixed(5)); }
+        const q = `[out:json][timeout:50];(${OSM_FILTERS.map(f => `${f}(around:20,${line.join(',')});`).join('')});out geom qt;`;
+        const seen = new Set(objs.map(o => o.id + o.bb[0]));
+        for (const o of parseOsm(await overpass(q), P)) if (!seen.has(o.id + o.bb[0])) objs.push(o);
+      } catch (e) { obsState = 'mislukt'; }
+    } else obsState = 'te ver';
+  }
+  if (seq !== routeSeq) return;
+  state.route = { ...base, objs, profile: buildProfile(dx, dy, D, makeIndex(objs, ext, 40), groundAt, D, fineStep), obsState };
+  setStatus(''); recompute();
+}
+
+/* ── berekenen ───────────────────────────────────────────────── */
+let rcTimer; function recompute() { clearTimeout(rcTimer); rcTimer = setTimeout(doRecompute, 60); }
+async function doRecompute() {
+  const p = params();
+  $('#altOut').textContent = p.alt + ' m'; $('#pilotHOut').textContent = fmt1(p.pilotH) + ' m';
+  renderEnvNote();
+  if (state.area && (!state.area.terrain || state.area.tR < R0() * 0.999)) { await ensureAreaTerrain(); }
+  drawReach(p);
+  analyzeRoute(p);
+}
+function drawReach(p) {
+  reachLayer.clearLayers();
+  const A = state.area, S = state.start, P = proj(S);
+  // Accu-bereik per richting (met wind)
+  const bat = []; for (let b = 0; b < 360; b += 5) { const r = battery(p, b).reach; bat.push(P.inv(Math.sin(toRad(b)) * r, Math.cos(toRad(b)) * r)); }
+  const vlos = state.drone.vlos;
+  L.circle([S.lat, S.lng], { radius: vlos, color: css('--muted'), weight: 1.5, dashArray: '2 5', fill: false, interactive: false }).addTo(reachLayer);
+  if (!A || !A.terrain) { L.polygon(bat, { color: css('--blue'), weight: 2.5, dashArray: '8 6', fill: false }).bindTooltip('Accu: max afstand heen & terug', { className: 'tip', sticky: true }).addTo(reachLayer); return; }
+  const r0 = R0(), hP = A.ground0 + p.pilotH, hD = A.ground0 + p.alt;
+  const maxPts = [], strongPts = [];
+  for (let k = 0; k < BEARINGS; k++) {
+    const b = k * 360 / BEARINGS, a = toRad(b), dx = Math.sin(a), dy = Math.cos(a);
+    const pr = buildProfile(dx, dy, r0, A.index, areaGround(b), AREA_RADIUS, 4);
+    const step = Math.max(20, r0 / 160);
+    let strong = null, mx = r0;
+    for (let d = 30; d <= r0; d += step) {
+      const m = 20 * Math.log10(r0 / d) - linkLoss(pr, d, hP, hD);
+      if (strong === null && m < 6) strong = Math.max(0, d - step);
+      if (m < 0) { mx = Math.max(0, d - step); break; }
+    }
+    if (strong === null) strong = r0 / 2;
+    maxPts.push(P.inv(dx * mx, dy * mx)); strongPts.push(P.inv(dx * strong, dy * strong));
+  }
+  state.reachMax = maxPts;
+  L.polygon(strongPts, { stroke: false, fillColor: css('--magenta'), fillOpacity: 0.16, interactive: false }).addTo(reachLayer);
+  L.polygon(maxPts, { color: css('--magenta'), weight: 2, fill: false }).bindTooltip(`Signaal: max bereik (${ENVIRONMENTS[envKey()].label.toLowerCase()}, ${p.alt} m hoog)`, { className: 'tip', sticky: true }).addTo(reachLayer);
+  L.polygon(bat, { color: css('--blue'), weight: 2.5, dashArray: '8 6', fill: false }).bindTooltip(`Accu: max afstand heen & terug (landen met ${p.reserve}%)`, { className: 'tip', sticky: true }).addTo(reachLayer);
+  if (!$('#ovl [data-v="reach"]').matches('[aria-pressed="true"]')) map.removeLayer(reachLayer);
+}
+
+function analyzeRoute(p) {
+  routeLayer.clearLayers(); obstLayer.clearLayers();
+  const R = state.route;
+  if (!state.target) { renderVerdict(null); return; }
+  if (!R) { $('#vBig').textContent = 'Route laden…'; return; }
+  const D = R.D, r0 = R0(), hP = R.ground0 + p.pilotH, hD = R.ground0 + p.alt;
+  const N = Math.max(8, Math.min(48, Math.ceil(D / 30))), pos = [];
+  for (let k = 1; k <= N; k++) { const d = D * k / N; const m = 20 * Math.log10(r0 / d) - linkLoss(R.profile, d, hP, hD); pos.push({ d, m }); }
+  let worst = pos[0]; for (const q of pos) if (q.m < worst.m) worst = q;
+  const lossAt = linkLoss(R.profile, worst.d, hP, hD, true);
+  const firstLost = pos.find(q => q.m < 0);
+  const bat = battery(p, R.bearing, D);
+  // Botsingsrisico: terrein/obstakel hoger dan vlieghoogte
+  let clash = null; const pr = R.profile;
+  for (let i = 0; i < pr.xs.length; i++) { const top = pr.g[i] + (pr.ob[i] ? pr.ob[i].h : 0); if (top > hD - 5 && (!clash || top > clash.top)) clash = { x: pr.xs[i], top, o: pr.ob[i] }; }
+  const res = { p, D, r0, pos, worst, lossAt, firstLost, bat, clash, hP, hD };
+  state.lastRes = res;
+  // Route-lijn gekleurd op signaalmarge
+  const col = m => m >= 6 ? css('--ok') : m >= 0 ? css('--warn') : css('--bad');
+  let prev = [R.S.lat, R.S.lng];
+  for (const q of pos) { const ll = latlngAlong(R, q.d); L.polyline([prev, ll], { color: col(q.m), weight: 5, opacity: .9, interactive: false }).addTo(routeLayer); prev = ll; }
+  if (firstLost) L.circleMarker(latlngAlong(R, firstLost.d), { radius: 7, color: css('--bad'), weight: 3, fillColor: '#fff', fillOpacity: 1 }).bindTooltip(`Hier valt het signaal weg (${fmtKm(firstLost.d)})`, { className: 'tip' }).addTo(routeLayer);
+  // Obstakels langs de route tekenen; blokkerende extra dik
+  const blocking = new Set(lossAt.runs.filter(r => r.loss > 1).map(r => r.o.id));
+  for (const o of R.objs) {
+    const c = o.kind === 'b' ? css('--bldg') : css('--tree'), hit = blocking.has(o.id);
+    const st = { color: hit ? css('--bad') : c, weight: hit ? 2.5 : 1, fillColor: c, fillOpacity: hit ? .55 : .3 };
+    const tip = `${o.kind === 'b' ? 'Gebouw' : 'Bomen'}${o.label ? ' · ' + esc(o.label) : ''} · ≈${Math.round(o.h)} m (${o.src})`;
+    const shp = o.shape === 'c' ? L.circle(o.ll[0], { radius: o.r, ...st }) : o.shape === 'l' ? L.polyline(o.ll, { ...st, weight: hit ? 6 : 4, opacity: .7 }) : L.polygon(o.ll, st);
+    shp.bindTooltip(tip, { className: 'tip', sticky: true }).addTo(obstLayer);
+  }
+  if (!$('#ovl [data-v="obst"]').matches('[aria-pressed="true"]')) map.removeLayer(obstLayer);
+  renderVerdict(res);
+  drawProfile(res); drawMargin(res);
+}
+function latlngAlong(R, d) { const [tx, ty] = R.P.fwd(R.Tg.lat, R.Tg.lng); const f = d / R.D; return R.P.inv(tx * f, ty * f); }
+
+/* ── uitslag ─────────────────────────────────────────────────── */
+function renderVerdict(r) {
+  const V = $('#verdict'), why = $('#why'); why.innerHTML = '';
+  if (!r) { V.dataset.s = ''; $('#vBig').textContent = 'Kies een bestemming'; $('#mBat').textContent = $('#mSig').textContent = '—'; return; }
+  const { p, bat, worst, lossAt, firstLost, D, clash } = r, d = state.drone, items = [];
+  const add = (cls, html) => items.push(`<li>${cls ? `<span class="pill ${cls}">${{ ok: 'ok', warn: 'let op', bad: 'probleem' }[cls]}</span> ` : ''}${html}</li>`);
+  // accu
+  let sBat;
+  if (bat.impossible) { sBat = 'bad'; add('bad', `De wind (${fmt1(p.wind)} m/s) is sterker dan wat de ${d.name} in deze snelheidsmodus kan vliegen (${fmt1(bat.v)} m/s). Zet hem op Sport, of vlieg niet.`); }
+  else {
+    sBat = bat.land >= p.reserve ? 'ok' : bat.land >= 10 ? 'warn' : 'bad';
+    add(sBat, `Heen ${fmt1(bat.tOut)} min, terug ${fmt1(bat.tBack)} min, filmen ${fmt1(p.hover)} min, stijgen en dalen ${fmt1(p.alt / 5 / 60 + p.alt / 3.5 / 60)} min. ${bat.land >= 0 ? `<b>Je landt met ${Math.round(bat.land)}%</b>` : `<b>Je komt ${Math.round(-bat.land)}% accu tekort</b>`}${sBat === 'ok' ? '.' : sBat === 'warn' ? ` (onder je reserve van ${p.reserve}%).` : '. Dat haal je niet: de drone gaat eerder automatisch landen of terugvliegen.'}`);
+  }
+  // signaal
+  const sSig = worst.m >= 6 ? 'ok' : worst.m >= 0 ? 'warn' : 'bad';
+  if (firstLost) add('bad', `Op ongeveer <b>${fmtKm(firstLost.d)}</b> valt de verbinding weg en keert de drone terug (RTH).`);
+  else if (sSig === 'warn') add('warn', `Signaal wordt zwak (${fmt1(worst.m)} dB marge op ${fmtKm(worst.d)}). Reken op haperend beeld.`);
+  else add('ok', `Signaal blijft sterk: minstens ${fmt1(worst.m)} dB marge over de hele route.`);
+  for (const run of lossAt.runs.slice(0, 3)) {
+    if (run.loss < 1.5) continue;
+    const o = run.o, what = o.kind === 'b' ? `Gebouw${o.label ? ' (' + esc(o.label) + ')' : ''}, ≈${Math.round(o.h)} m hoog` : `Bomen, ≈${Math.round(o.h)} m hoog${run.depth > 6 ? `, ${Math.round(run.depth)} m dik in de zichtlijn` : ''}`;
+    add(null, `${what}, op ${fmtKm(run.x)} van jou: kost ${Math.round(run.loss)} dB${o.src === 'schatting' ? ' (hoogte geschat)' : ''}.`);
+  }
+  const obs = state.route.obsState;
+  if (obs === 'laden') add(null, '<i>Gebouwen en bomen worden nog geladen. Dit is voorlopig alleen terrein.</i>');
+  else if (obs === 'mislukt') add('warn', 'Gebouwen en bomen konden niet geladen worden (OSM-servers druk). Uitslag is alleen op terrein gebaseerd. Sleep D een klein stukje om het opnieuw te proberen.');
+  else if (obs === 'te ver') add('warn', 'Route is langer dan 40 km, dus alleen terrein meegenomen.');
+  if (lossAt.terrainBlock) add('bad', `Het terrein zelf blokkeert het zicht op ${fmtKm(lossAt.terrainX)}.`);
+  // overig
+  if (clash) add('bad', `<b>Botsingsgevaar:</b> ${clash.o ? (clash.o.kind === 'b' ? 'een gebouw' : 'bomen') : 'het terrein'} op ${fmtKm(clash.x)} reikt tot ${Math.round(clash.top - r.hP + p.pilotH)} m boven je startpunt, dicht bij je vlieghoogte (${p.alt} m).`);
+  const wAlt = p.wind;
+  if (wAlt > d.wind) add('bad', `Wind (${fmt1(wAlt)} m/s) is meer dan de max windweerstand van de ${d.name} (${fmt1(d.wind)} m/s).`);
+  else if (state.wx && !state.manualWx && state.wx.gust > d.wind) add('warn', `Windstoten tot ${fmt1(state.wx.gust)} m/s, meer dan de ${fmt1(d.wind)} m/s die de ${d.name} aankan.`);
+  if (p.temp < 5) add('warn', `Koud (${p.temp} °C): de accu levert ~${Math.round((1 - tempFactor(p.temp)) * 100)}% minder. Houd je accu's warm tot je opstijgt.`);
+  if (p.alt > 120) add('warn', `Boven 120 m vliegen mag in de EU niet (open categorie).`);
+  if (D > d.vlos) add('warn', `De bestemming ligt op ${fmtKm(D)}. Een ${d.name} zie je tot ongeveer ${d.vlos} m. In de EU moet je de drone zelf kunnen zien (VLOS).`);
+  if (state.battery === 'plus' && d.plus && !d.plus.eu && state.region === 'ce') add('warn', `De Plus-accu wordt in de EU niet verkocht (met Plus-accu is de drone zwaarder dan 250 g).`);
+  why.innerHTML = items.join('');
+  const order = { ok: 0, warn: 1, bad: 2 }, s = order[sBat] >= order[sSig] ? sBat : sSig;
+  V.dataset.s = s; $('#vBig').textContent = { ok: 'Haalbaar', warn: 'Krap', bad: 'Niet haalbaar' }[s];
+  const bl = bat.impossible ? 0 : Math.max(0, bat.land);
+  $('#mBat').textContent = bat.impossible ? 'n.v.t.' : Math.round(bat.land) + '%';
+  Object.assign($('#bBat').style, { width: Math.min(100, bl) + '%', background: css(sBat === 'ok' ? '--ok' : sBat === 'warn' ? '--warn' : '--bad') });
+  $('#mSig').textContent = (worst.m >= 0 ? '+' : '') + fmt1(worst.m) + ' dB';
+  Object.assign($('#bSig').style, { width: Math.max(2, Math.min(100, (worst.m + 10) / 40 * 100)) + '%', background: css(sSig === 'ok' ? '--ok' : sSig === 'warn' ? '--warn' : '--bad') });
+}
+
+/* ── grafieken ───────────────────────────────────────────────── */
+function prepCv(cv) { const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight; cv.width = w * dpr; cv.height = h * dpr; const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h); c.font = `11px ${css('--f-mono')}`; return { c, w, h }; }
+function drawProfile(r) {
+  const { c, w, h } = prepCv($('#profileCv')), R = state.route, pr = R.profile, D = r.D;
+  const padL = 38, padR = 10, padT = 10, padB = 20, W = w - padL - padR, H = h - padT - padB;
+  let lo = Infinity, hi = -Infinity; for (let i = 0; i < pr.xs.length; i++) { lo = Math.min(lo, pr.g[i]); hi = Math.max(hi, pr.g[i] + (pr.ob[i] ? pr.ob[i].h : 0)); }
+  lo = Math.min(lo, r.hP) - 3; hi = Math.max(hi, r.hD) + 8;
+  const X = x => padL + x / D * W, Y = z => padT + H - (z - lo) / (hi - lo) * H;
+  // raster
+  c.strokeStyle = css('--line'); c.fillStyle = css('--muted'); c.lineWidth = 1;
+  const yStep = niceStep((hi - lo) / 4); for (let z = Math.ceil(lo / yStep) * yStep; z <= hi; z += yStep) { c.beginPath(); c.moveTo(padL, Y(z)); c.lineTo(w - padR, Y(z)); c.stroke(); c.fillText(Math.round(z - R.ground0) + ' m', 2, Y(z) + 4); }
+  const xStep = niceStep(D / 5); for (let x = 0; x <= D + 1; x += xStep) c.fillText(fmtKm(x), Math.min(X(x) - 8, w - 50), h - 5);
+  // Fresnelzone
+  c.fillStyle = css('--blue'); c.globalAlpha = .18; c.beginPath();
+  for (let i = 0; i <= 100; i++) { const x = D * i / 100, rr = Math.sqrt(LAMBDA * x * (D - x) / D), y = r.hP + (r.hD - r.hP) * x / D; i ? c.lineTo(X(x), Y(y + rr)) : c.moveTo(X(x), Y(y + rr)); }
+  for (let i = 100; i >= 0; i--) { const x = D * i / 100, rr = Math.sqrt(LAMBDA * x * (D - x) / D), y = r.hP + (r.hD - r.hP) * x / D; c.lineTo(X(x), Y(y - rr)); }
+  c.fill(); c.globalAlpha = 1;
+  // obstakels
+  for (let i = 0; i < pr.xs.length; i++) { const o = pr.ob[i]; if (!o) continue; const x0 = X(i ? pr.xs[i - 1] : 0), x1 = X(pr.xs[i]); c.fillStyle = css(o.kind === 'b' ? '--bldg' : '--tree'); c.fillRect(x0, Y(pr.g[i] + o.h), Math.max(1, x1 - x0 + .5), Y(pr.g[i]) - Y(pr.g[i] + o.h)); }
+  // terrein
+  c.fillStyle = css('--terrain'); c.beginPath(); c.moveTo(X(0), Y(lo)); c.lineTo(X(0), Y(R.ground0));
+  for (let i = 0; i < pr.xs.length; i += Math.max(1, Math.floor(pr.xs.length / 600))) c.lineTo(X(pr.xs[i]), Y(pr.g[i]));
+  c.lineTo(X(D), Y(lo)); c.closePath(); c.fill();
+  // zichtlijn
+  c.strokeStyle = css('--magenta'); c.lineWidth = 2; c.beginPath(); c.moveTo(X(0), Y(r.hP)); c.lineTo(X(D), Y(r.hD)); c.stroke();
+  c.setLineDash([4, 4]); c.strokeStyle = css('--muted'); c.lineWidth = 1; c.beginPath(); c.moveTo(X(0), Y(r.hD)); c.lineTo(X(D), Y(r.hD)); c.stroke(); c.setLineDash([]);
+  // piloot + drone
+  dot(c, X(0), Y(r.hP), css('--ink'), 'P'); dot(c, X(D), Y(r.hD), css('--magenta'), 'D');
+  $('#profCap').textContent = `Van jou (P) naar de bestemming (D) · ${fmtKm(D)} · vlieghoogte ${r.p.alt} m`;
+}
+function dot(c, x, y, col, t) { c.fillStyle = col; c.beginPath(); c.arc(x, y, 7, 0, 7); c.fill(); c.fillStyle = '#fff'; c.font = `700 9px ${css('--f-mono')}`; c.fillText(t, x - 3, y + 3); c.font = `11px ${css('--f-mono')}`; }
+function niceStep(raw) { const p = 10 ** Math.floor(Math.log10(raw || 1)), n = raw / p; return (n < 1.5 ? 1 : n < 3.5 ? 2 : n < 7.5 ? 5 : 10) * p; }
+function drawMargin(r) {
+  const { c, w, h } = prepCv($('#marginCv')), D = r.D, padL = 30, padR = 8, padT = 8, padB = 20, W = w - padL - padR, H = h - padT - padB;
+  const lo = -20, hi = 40, X = x => padL + x / D * W, Y = m => padT + H - (Math.max(lo, Math.min(hi, m)) - lo) / (hi - lo) * H;
+  const band = (a, b, col) => { c.fillStyle = col; c.globalAlpha = .14; c.fillRect(padL, Y(b), W, Y(a) - Y(b)); c.globalAlpha = 1; };
+  band(lo, 0, css('--bad')); band(0, 6, css('--warn')); band(6, hi, css('--ok'));
+  c.fillStyle = css('--muted'); for (const m of [-20, 0, 6, 20, 40]) c.fillText(m, 2, Y(m) + 4);
+  c.fillText(fmtKm(0), padL, h - 5); c.fillText(fmtKm(D), w - padR - 48, h - 5);
+  c.strokeStyle = css('--ink'); c.lineWidth = 2; c.beginPath(); c.moveTo(X(0), Y(40));
+  r.pos.forEach((q, i) => i ? c.lineTo(X(q.d), Y(q.m)) : c.moveTo(X(q.d), Y(q.m))); c.stroke();
+}
+
+/* ── weer ────────────────────────────────────────────────────── */
+let wxData = null;
+async function loadWeather() {
+  const S = state.start;
+  try {
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${S.lat.toFixed(4)}&longitude=${S.lng.toFixed(4)}&hourly=temperature_2m,wind_speed_10m,wind_speed_80m,wind_speed_120m,wind_direction_10m,wind_direction_80m,wind_direction_120m,wind_gusts_10m&wind_speed_unit=ms&timezone=auto&forecast_days=3`);
+    wxData = (await r.json()).hourly;
+    const sel = $('#wxTime'), now = new Date(); sel.innerHTML = '';
+    const nowKey = wxData.time.findIndex(t => new Date(t) > new Date(now.getTime() - 3600e3));
+    for (let i = Math.max(0, nowKey); i < Math.min(wxData.time.length, nowKey + 48); i++) {
+      const t = new Date(wxData.time[i]); const o = document.createElement('option'); o.value = i;
+      o.textContent = i === nowKey ? `Nu (${t.getHours()}:00)` : t.toLocaleDateString('nl-NL', { weekday: 'short' }) + ' ' + t.getHours() + ':00'; sel.append(o);
+    }
+    applyWeather();
+  } catch (e) { $('#wxNote').textContent = 'Weer ophalen lukte niet. Vul de wind zelf in.'; }
+}
+function applyWeather() {
+  if (!wxData) return;
+  const i = +$('#wxTime').value, alt = +$('#alt').value, H = wxData;
+  const pts = [[10, H.wind_speed_10m[i]], [80, H.wind_speed_80m[i]], [120, H.wind_speed_120m[i]]];
+  let w; if (alt <= 10) w = pts[0][1]; else if (alt <= 80) w = pts[0][1] + (pts[1][1] - pts[0][1]) * (alt - 10) / 70; else if (alt <= 120) w = pts[1][1] + (pts[2][1] - pts[1][1]) * (alt - 80) / 40; else w = pts[2][1] * (alt / 120) ** 0.14;
+  const dir = alt < 45 ? H.wind_direction_10m[i] : alt < 100 ? H.wind_direction_80m[i] : H.wind_direction_120m[i];
+  const gust = H.wind_gusts_10m[i] * (w / Math.max(0.5, pts[0][1]));
+  state.wx = { w, dir, gust, temp: H.temperature_2m[i] };
+  $('#windSpd').value = w.toFixed(1); $('#windDir').value = Math.round(dir); $('#temp').value = Math.round(H.temperature_2m[i]);
+  $('#wxNote').innerHTML = `Op ${alt} m: <b>${fmt1(w)} m/s uit het ${compass(dir)}</b>, vlagen tot ~${fmt1(gust)} m/s. Bron: Open-Meteo. Je kunt de waarden zelf aanpassen.`;
+  state.manualWx = false; recompute();
+}
+
+/* ── UI ──────────────────────────────────────────────────────── */
+function renderDrone() {
+  const d = state.drone, plus = d.plus;
+  const bs = $('#battery'); bs.innerHTML = `<option value="std">Standaard (${d.time} min)</option>` + (plus ? `<option value="plus">Plus (${plus.time} min)${plus.eu ? '' : ' · niet in EU'}</option>` : '');
+  if (state.battery === 'plus' && plus) bs.value = 'plus'; else { state.battery = 'std'; bs.value = 'std'; }
+  const T = state.battery === 'plus' && plus ? plus.time : d.time;
+  $('#specs').innerHTML = [['Vliegtijd', T + ' min'], ['Bereik ' + state.region.toUpperCase(), specKm(d) + ' km'], ['Sport', Math.round(d.sport * 3.6) + ' km/h'], ['Wind max', fmt1(d.wind).replace(',0', '') + ' m/s']].map(([a, b]) => `<div class="spec"><small>${a}</small><b>${b}</b></div>`).join('');
+  $('#droneNote').innerHTML = `${esc(d.sys)} · ${d.weight} g · ${d.year}. ${esc(d.note)} <a href="${d.src}" target="_blank" rel="noopener">DJI-specs ↗</a>`;
+}
+function renderEnvNote() {
+  const k = envKey(), e = ENVIRONMENTS[k];
+  $('#envNote').innerHTML = `${state.env === 'auto' && state.coverage != null ? `Bebouwing binnen 800 m: ${Math.round(state.coverage * 100)}% → <b>${e.label}</b>. ` : ''}Bereik zonder obstakels: ${specKm(state.drone)} km × ${String(e.f).replace('.', ',')} = <b>${fmtKm(R0())}</b>.`;
+}
+function seg(id, cb) { $(id).addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; $(id).querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); cb(b.dataset.v); }); }
+
+function init() {
+  const ds = $('#drone'), groups = {};
+  for (const d of DRONES) (groups[d.series] ||= []).push(d);
+  ds.innerHTML = Object.entries(groups).map(([g, list]) => `<optgroup label="${g}">${list.map(d => `<option value="${d.id}">DJI ${d.name}</option>`).join('')}</optgroup>`).join('');
+  ds.value = state.drone.id;
+  ds.addEventListener('change', () => { state.drone = DRONES.find(d => d.id === ds.value); renderDrone(); recompute(); });
+  $('#battery').addEventListener('change', e => { state.battery = e.target.value; renderDrone(); recompute(); });
+  seg('#region', v => { state.region = v; renderDrone(); recompute(); });
+  seg('#speed', v => { state.speed = v; recompute(); });
+  seg('#base', v => { map.removeLayer(curBase); curBase = bases[v].addTo(map); });
+  $('#ovl').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') !== 'true');
+    const on = v => $(`#ovl [data-v="${v}"]`).getAttribute('aria-pressed') === 'true';
+    on('obst') ? obstLayer.addTo(map) : map.removeLayer(obstLayer); on('reach') ? reachLayer.addTo(map) : map.removeLayer(reachLayer);
+  });
+  const envSel = $('#env'); envSel.innerHTML += Object.entries(ENVIRONMENTS).map(([k, e]) => `<option value="${k}">${e.label}</option>`).join('');
+  envSel.addEventListener('change', () => { state.env = envSel.value; recompute(); });
+  for (const id of ['#hover', '#startPct', '#reserve', '#health', '#pilotH', '#windSpd', '#windDir', '#temp']) $(id).addEventListener('input', () => { if (/wind|temp/i.test(id)) state.manualWx = true; recompute(); });
+  $('#alt').addEventListener('input', () => { if (!state.manualWx) applyWeather(); recompute(); });
+  $('#wxTime').addEventListener('change', applyWeather);
+  $('#pickStart').addEventListener('click', () => setPick(state.pick === 'start' ? null : 'start'));
+  $('#pickTarget').addEventListener('click', () => setPick(state.pick === 'target' ? null : 'target'));
+  $('#geo').addEventListener('click', () => navigator.geolocation?.getCurrentPosition(pos => { setStart({ lat: pos.coords.latitude, lng: pos.coords.longitude, name: null }); map.setView([pos.coords.latitude, pos.coords.longitude], 15); }, () => setStatus('Locatie niet beschikbaar. Kies je startpunt op de kaart.')));
+  $('#searchForm').addEventListener('submit', search);
+  $('#sources').innerHTML = DRONES.map(d => `<li><a href="${d.src}" target="_blank" rel="noopener">DJI ${esc(d.name)} specs</a></li>`).join('') +
+    `<li>DJI O4-tabel "obstructed by buildings/trees": <a href="https://www.dji.com/support/product/o4-ground-station" target="_blank" rel="noopener">dji.com</a></li>
+     <li>Vegetatie-demping 2–5 GHz (ITU-R P.833): <a href="https://rfessentials.com/rf-knowledge-base/how-does-vegetation-attenuation-affect-rf-propagation-and-how-do-i-estimate-the-/" target="_blank" rel="noopener">rfessentials.com</a></li>
+     <li>Praktijk-vliegtijd 60–85% van spec: <a href="https://hiredronepilot.uk/blog/drone-battery-life/" target="_blank" rel="noopener">hiredronepilot.uk</a>, <a href="https://mavicpilots.com/threads/mavic-3-pro-flight-times.155303/post-1739195" target="_blank" rel="noopener">mavicpilots.com</a></li>`;
+  renderDrone(); renderPts();
+  const fit = L.latLngBounds([[state.start.lat, state.start.lng], [state.target.lat, state.target.lng]]).pad(0.35);
+  requestAnimationFrame(() => { map.invalidateSize(); map.fitBounds(fit); });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', recompute);
+  addEventListener('resize', () => state.lastRes && (drawProfile(state.lastRes), drawMargin(state.lastRes)));
+  loadWeather(); loadArea(); loadRoute();
+}
+
+/* ── zoeken ──────────────────────────────────────────────────── */
+async function search(e) {
+  e.preventDefault();
+  const q = $('#q').value.trim(), box = $('#results'); if (!q) return;
+  const show = list => {
+    box.hidden = false;
+    box.innerHTML = list.length ? list.map((r, i) => `<div class="r"><div>${esc(r.name)}</div><div class="row"><button class="btn" data-i="${i}" data-a="target" type="button">Vlieg hierheen</button><button class="btn" data-i="${i}" data-a="start" type="button">Start hier</button><button class="btn" data-i="${i}" data-a="view" type="button">Bekijk</button></div></div>`).join('') : '<div class="r"><div>Niets gevonden. Probeer een andere schrijfwijze of een plaatsnaam erbij.</div></div>';
+    box.onclick = ev => { const b = ev.target.closest('button'); if (!b) return; const r = list[b.dataset.i]; box.hidden = true; map.setView([r.lat, r.lng], Math.max(map.getZoom(), 15)); if (b.dataset.a === 'start') setStart({ ...r }); else if (b.dataset.a === 'target') setTarget({ ...r }); };
+  };
+  const m = q.match(/^\s*(-?\d+(?:[.,]\d+)?)\s*[,; ]\s*(-?\d+(?:[.,]\d+)?)\s*$/);
+  if (m) return show([{ lat: parseFloat(m[1].replace(',', '.')), lng: parseFloat(m[2].replace(',', '.')), name: `Coördinaat ${m[1]}, ${m[2]}` }]);
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&accept-language=nl&q=${encodeURIComponent(q)}`);
+    const j = await r.json(); show(j.map(x => ({ lat: +x.lat, lng: +x.lon, name: x.display_name })));
+  } catch { show([]); }
+}
+init();
+
+</script>
+</body>
+</html>
